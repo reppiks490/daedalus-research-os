@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 from dataclasses import asdict, dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pandas as pd
 
@@ -36,7 +36,14 @@ def load_identity_manifest(path: Path) -> dict[str, SourceIdentity]:
         raise ValueError(f"Identity manifest {path} missing columns: {sorted(missing)}")
     out: dict[str, SourceIdentity] = {}
     for row in df.to_dict(orient="records"):
-        key = str(row["relative_path"]).replace("\\", "/").lstrip("./")
+        raw = str(row["relative_path"]).replace("\\", "/")
+        relative = PurePosixPath(raw)
+        if (not raw or relative.is_absolute() or ".." in relative.parts
+                or ":" in raw or relative.as_posix() == "."):
+            raise ValueError(f"Invalid source identity path: {raw!r}")
+        key = relative.as_posix()
+        if key in out:
+            raise ValueError(f"Duplicate source identity path: {key}")
         out[key] = SourceIdentity(
             relative_path=key,
             canonical_symbol=str(row["canonical_symbol"]).strip(),
@@ -51,8 +58,8 @@ def load_identity_manifest(path: Path) -> dict[str, SourceIdentity]:
 def resolve_identity(path: Path, data_root: Path, manifest: dict[str, SourceIdentity], symbol_hint: str) -> SourceIdentity:
     try:
         rel = path.resolve().relative_to(data_root.resolve()).as_posix()
-    except ValueError:
-        rel = path.name
+    except ValueError as exc:
+        raise ValueError(f"Source is outside its declared data root: {path}") from exc
     if rel in manifest:
         return manifest[rel]
     return SourceIdentity(
