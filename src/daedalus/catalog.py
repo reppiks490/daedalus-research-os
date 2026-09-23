@@ -51,15 +51,21 @@ def _parse_name(path: Path) -> tuple[str, str]:
     return stem, ""
 
 
-def discover_csvs(root: Path) -> list[Path]:
-    root = root.expanduser().resolve()
+def discover_csvs(root: Path | Iterable[Path]) -> list[Path]:
+    roots = [root] if isinstance(root, Path) else list(root)
     out: list[Path] = []
-    for path in root.rglob("*.csv"):
-        name = path.name
-        if name.startswith("._") or "__MACOSX" in path.parts:
-            continue
-        if path.is_file():
-            out.append(path)
+    seen_paths: set[Path] = set()
+    for source_root in roots:
+        source_root = source_root.expanduser().resolve()
+        if not source_root.is_dir():
+            raise ValueError(f"CSV root is not a directory: {source_root}")
+        for path in source_root.rglob("*.csv"):
+            name = path.name
+            if name.startswith("._") or "__MACOSX" in path.parts:
+                continue
+            if path.is_file() and path not in seen_paths:
+                out.append(path)
+                seen_paths.add(path)
     return sorted(out)
 
 
@@ -160,11 +166,11 @@ def profile_csv(path: Path, sample_rows: int = 50_000) -> SourceProfile:
     )
 
 
-def build_catalog(root: Path) -> pd.DataFrame:
+def build_catalog(root: Path | Iterable[Path]) -> pd.DataFrame:
     profiles = [profile_csv(p).to_dict() for p in discover_csvs(root)]
     if not profiles:
         return pd.DataFrame()
     df = pd.DataFrame(profiles)
     counts = df.groupby("sha256")["sha256"].transform("size")
     df["exact_duplicate_count"] = counts.astype(int)
-    return df.sort_values(["symbol_hint", "suffix_hint", "filename"]).reset_index(drop=True)
+    return df.sort_values(["symbol_hint", "suffix_hint", "filename", "path"]).reset_index(drop=True)

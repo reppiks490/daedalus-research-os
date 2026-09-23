@@ -18,7 +18,7 @@ from .shadow import ShadowBook
 
 
 def cmd_catalog(args) -> int:
-    df = build_catalog(Path(args.data_root))
+    df = build_catalog([Path(root) for root in args.data_roots])
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(out, index=False)
@@ -28,6 +28,7 @@ def cmd_catalog(args) -> int:
         "exact_duplicate_file_count": int((df["exact_duplicate_count"] > 1).sum()) if len(df) else 0,
         "unique_mechanics_signatures": int(df["mechanics_signature"].nunique()) if len(df) else 0,
         "mechanics_classes": df["mechanics_class"].value_counts().to_dict() if len(df) else {},
+        "source_roots": args.data_roots,
         "output": str(out),
     }
     print(json.dumps(summary, indent=2))
@@ -212,7 +213,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command", required=True)
 
     c = sub.add_parser("catalog", help="Recursively catalog CSV sources without collapsing chart variants")
-    c.add_argument("data_root")
+    c.add_argument("data_roots", nargs="+", help="One or more distinct CSV roots; overlapping paths are scanned once")
     c.add_argument("--output", default="artifacts/catalog.csv")
     c.set_defaults(func=cmd_catalog)
 
