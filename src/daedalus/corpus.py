@@ -8,7 +8,9 @@ from .bridge import export_candidate
 from .catalog import build_catalog
 from .config import DaedalusConfig
 from .holdout_budget import development_rank_key, select_holdout_exposures
+from .holdout import HoldoutLedger
 from .hypotheses import benjamini_hochberg
+from .identity import load_identity_manifest, resolve_identity
 from .pipeline import research_file
 from .registry import ExperimentRegistry
 from .shadow import ShadowBook
@@ -33,6 +35,17 @@ def research_corpus(
     catalog = build_catalog(data_root)
     if catalog.empty:
         return {"status": "empty", "data_root": str(data_root)}
+
+    manifest = load_identity_manifest(project_root / cfg.runtime.identity_manifest)
+    for digest, copies in catalog.groupby("sha256"):
+        if len(copies) < 2:
+            continue
+        identities = [resolve_identity(Path(row.path), data_root, manifest, row.symbol_hint)
+                      for row in copies.itertuples(index=False)]
+        claims = {(item.canonical_symbol, item.chart_type, item.representation_role,
+                   item.execution_safe) for item in identities}
+        if len(claims) != 1:
+            raise ValueError(f"Exact-byte sources disagree on chart identity: {digest}")
 
     artifacts = project_root / "artifacts"
     artifacts.mkdir(parents=True, exist_ok=True)
@@ -66,6 +79,9 @@ def research_corpus(
 
     selection = select_holdout_exposures(development_reports, cfg.holdout_budget)
     selected_set = set(selection.selected_indices)
+    ledger = HoldoutLedger(project_root / cfg.runtime.holdout_ledger_path)
+    selected_hashes = {str(source_rows[idx]["sha256"]) for idx in selected_set}
+    prior_exposures = {digest: ledger.total_exposures(digest) for digest in selected_hashes}
 
     # Final report list retains every screened source. Qualified but unselected sources
     # explicitly record that their protected tails remain pristine.
@@ -156,7 +172,8 @@ def research_corpus(
         globally_eligible.append(candidate)
         registry.set_promoted(result["experiment_id"], True)
 
-    holdout_touched = sum(bool(r.get("final_candidate", {}).get("protected_holdout_touched", False)) for r in reports)
+    holdout_touched = sum(ledger.total_exposures(digest) - prior_exposures[digest]
+                          for digest in selected_hashes)
     summary = {
         "status": "ok",
         "cataloged_real_csv_files": int(len(catalog)),

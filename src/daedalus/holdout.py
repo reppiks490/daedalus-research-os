@@ -80,6 +80,14 @@ class HoldoutLedger:
             protocol_clean=conflicts == 0,
         )
 
+    def total_exposures(self, source_sha256: str) -> int:
+        with sqlite_connection(self.path) as con:
+            row = con.execute(
+                "SELECT COALESCE(SUM(exposure_count), 0) FROM holdout_exposures WHERE source_sha256=?",
+                (source_sha256,),
+            ).fetchone()
+        return int(row[0])
+
     def record(self, assessment: HoldoutAssessment) -> None:
         now = datetime.now(timezone.utc).isoformat()
         with sqlite_connection(self.path) as con:

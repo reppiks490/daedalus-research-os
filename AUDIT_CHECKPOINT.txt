@@ -1,7 +1,8 @@
-Checkpoint 2026-09-23 (CA): 57/57 tests pass with ResourceWarning as error.
-Static audit: 32 source files / 5,263 source lines, pass.
+Checkpoint 2026-09-23 (CA): 59/59 tests pass with ResourceWarning as error.
+Static audit: 32 source files / 5,288 source lines, pass.
 Scope: SQLite lifecycle, multi-root source-preserving catalog, and
 research-only manifest/CLI contract tests, and source-identity firewall.
+Corpus protected exposure is counted from ledger increments even on errors.
 Local six-root discovery: 803 source records, 542 unique byte hashes.
 No source-identity validation or protected final holdout was performed.
 No candidate qualified and no production execution authority was added.
