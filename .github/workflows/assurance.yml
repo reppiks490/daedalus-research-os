@@ -36,6 +36,16 @@ env:
   PYTHONUNBUFFERED: "1"
 
 jobs:
+  runner-probe:
+    name: Runner availability probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Confirm GitHub-hosted runner can execute
+        run: |
+          echo "runner available"
+          python --version
+
   tests:
     name: Tests / Python ${{ matrix.python }}
     runs-on: ubuntu-latest
@@ -122,7 +132,7 @@ jobs:
   assurance:
     name: Assurance gate
     if: always()
-    needs: [tests, audit-and-coverage, package]
+    needs: [runner-probe, tests, audit-and-coverage, package]
     runs-on: ubuntu-latest
     steps:
       - name: Require all gates
