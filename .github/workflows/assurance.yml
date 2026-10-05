@@ -1,0 +1,174 @@
+name: DAEDALUS research assurance
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "scripts/**"
+      - "pyproject.toml"
+      - ".github/workflows/assurance.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "scripts/**"
+      - "pyproject.toml"
+      - ".github/workflows/assurance.yml"
+  schedule:
+    - cron: "41 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daedalus-assurance-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  OPENBLAS_NUM_THREADS: "1"
+  OMP_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+  NUMEXPR_NUM_THREADS: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  tests:
+    if: github.event_name != 'schedule'
+    name: Tests / Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install package and test runner
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest
+      - name: Compile source and tests
+        run: python -m compileall -q src tests scripts
+      - name: Run invariant suite with resource leaks fatal
+        run: pytest -W error::ResourceWarning -q
+
+  audit-and-coverage:
+    if: github.event_name != 'schedule'
+    name: Static audit + coverage floor
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install package and assurance tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest pytest-cov
+      - name: Run DAEDALUS static research audit
+        run: python scripts/audit.py
+      - name: Enforce non-regression coverage floor
+        run: |
+          pytest -W error::ResourceWarning             --cov=daedalus             --cov-report=term-missing             --cov-report=xml:coverage.xml             --cov-fail-under=75             -q
+      - name: Smoke CLI contract
+        run: daedalus --help
+      - name: Upload coverage evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daedalus-coverage
+          path: coverage.xml
+          if-no-files-found: ignore
+          retention-days: 14
+
+  package:
+    if: github.event_name != 'schedule'
+    name: Build + install package artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Build wheel and source distribution
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build
+          python -m build
+      - name: Install built wheel and smoke CLI
+        run: |
+          python -m pip install --force-reinstall dist/*.whl
+          daedalus --help
+      - name: Preserve package evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: daedalus-package
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  scheduled-drift:
+    if: github.event_name == 'schedule'
+    name: Daily deterministic drift check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install package and test runner
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest
+      - name: Compile, test, audit, and smoke CLI
+        run: |
+          python -m compileall -q src tests scripts
+          pytest -W error::ResourceWarning -q
+          python scripts/audit.py
+          daedalus --help
+
+  assurance:
+    if: always() && github.event_name != 'schedule'
+    name: Assurance gate
+    needs: [tests, audit-and-coverage, package]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all change gates
+        env:
+          TESTS: ${{ needs.tests.result }}
+          AUDIT: ${{ needs.audit-and-coverage.result }}
+          PACKAGE: ${{ needs.package.result }}
+        run: |
+          printf 'tests=%s\naudit=%s\npackage=%s\n' "$TESTS" "$AUDIT" "$PACKAGE"
+          test "$TESTS" = success
+          test "$AUDIT" = success
+          test "$PACKAGE" = success
+
+  scheduled-assurance:
+    if: always() && github.event_name == 'schedule'
+    name: Scheduled assurance gate
+    needs: [scheduled-drift]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require drift check
+        env:
+          DRIFT: ${{ needs.scheduled-drift.result }}
+        run: test "$DRIFT" = success
