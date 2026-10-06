@@ -47,3 +47,12 @@ bare runner probe failed the same way, while the public AION workflow executed
 normally. The workflow itself remains installed; private-repository runner
 eligibility/quota/settings must permit a hosted runner before these gates can
 execute.
+
+## Dependency maintenance automation
+
+Dependabot checks GitHub Actions and Python packaging metadata every Monday in
+`America/Chicago`. Minor and patch updates are grouped to reduce pull-request
+noise; major updates remain isolated for explicit review. Dependency changes that
+touch `pyproject.toml` or workflow files are still subject to the repository's
+normal assurance gates before merge.
+
