@@ -40,7 +40,7 @@ jobs:
   tests:
     if: github.event_name != 'schedule'
     name: Tests / Python ${{ matrix.python }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.ASSURANCE_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 25
     strategy:
       fail-fast: false
@@ -66,7 +66,7 @@ jobs:
   audit-and-coverage:
     if: github.event_name != 'schedule'
     name: Static audit + coverage floor
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.ASSURANCE_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -104,7 +104,7 @@ jobs:
   package:
     if: github.event_name != 'schedule'
     name: Build + install package artifact
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.ASSURANCE_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -134,7 +134,7 @@ jobs:
   scheduled-drift:
     if: github.event_name == 'schedule'
     name: Daily deterministic drift check
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.ASSURANCE_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -159,7 +159,7 @@ jobs:
     if: always() && github.event_name != 'schedule'
     name: Assurance gate + evidence
     needs: [tests, audit-and-coverage, package]
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.ASSURANCE_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - name: Emit machine-readable assurance evidence
@@ -221,7 +221,7 @@ jobs:
     if: always() && github.event_name == 'schedule'
     name: Scheduled assurance gate + evidence
     needs: [scheduled-drift]
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.ASSURANCE_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - name: Emit scheduled assurance evidence
