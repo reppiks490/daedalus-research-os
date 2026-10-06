@@ -16,6 +16,7 @@ on:
       - "scripts/**"
       - "pyproject.toml"
       - ".github/workflows/assurance.yml"
+  merge_group:
   schedule:
     - cron: "41 7 * * *"
   workflow_dispatch:
@@ -56,6 +57,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e . pytest
+          python -m pip check
       - name: Compile source and tests
         run: python -m compileall -q src tests scripts
       - name: Run invariant suite with resource leaks fatal
@@ -77,18 +79,24 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e . pytest pytest-cov
+          python -m pip check
       - name: Run DAEDALUS static research audit
         run: python scripts/audit.py
       - name: Enforce non-regression coverage floor
         run: |
-          pytest -W error::ResourceWarning             --cov=daedalus             --cov-report=term-missing             --cov-report=xml:coverage.xml             --cov-fail-under=75             -q
+          pytest -W error::ResourceWarning \
+            --cov=daedalus \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            --cov-fail-under=75 \
+            -q
       - name: Smoke CLI contract
         run: daedalus --help
       - name: Upload coverage evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: daedalus-coverage
+          name: daedalus-coverage-${{ github.run_id }}-${{ github.run_attempt }}
           path: coverage.xml
           if-no-files-found: ignore
           retention-days: 14
@@ -113,11 +121,12 @@ jobs:
       - name: Install built wheel and smoke CLI
         run: |
           python -m pip install --force-reinstall dist/*.whl
+          python -m pip check
           daedalus --help
       - name: Preserve package evidence
         uses: actions/upload-artifact@v4
         with:
-          name: daedalus-package
+          name: daedalus-package-${{ github.run_id }}-${{ github.run_attempt }}
           path: dist/
           if-no-files-found: error
           retention-days: 7
@@ -138,6 +147,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e . pytest
+          python -m pip check
       - name: Compile, test, audit, and smoke CLI
         run: |
           python -m compileall -q src tests scripts
@@ -147,10 +157,55 @@ jobs:
 
   assurance:
     if: always() && github.event_name != 'schedule'
-    name: Assurance gate
+    name: Assurance gate + evidence
     needs: [tests, audit-and-coverage, package]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
+      - name: Emit machine-readable assurance evidence
+        env:
+          TESTS: ${{ needs.tests.result }}
+          AUDIT: ${{ needs.audit-and-coverage.result }}
+          PACKAGE: ${{ needs.package.result }}
+        run: |
+          mkdir -p assurance
+          python - <<'PY'
+          import json, os
+          from datetime import datetime, timezone
+          gates = {
+              "tests": os.environ["TESTS"],
+              "audit_and_coverage": os.environ["AUDIT"],
+              "package": os.environ["PACKAGE"],
+          }
+          doc = {
+              "schema_version": 1,
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "workflow": os.environ["GITHUB_WORKFLOW"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "event": os.environ["GITHUB_EVENT_NAME"],
+              "sha": os.environ["GITHUB_SHA"],
+              "ref": os.environ["GITHUB_REF"],
+              "generated_at": datetime.now(timezone.utc).isoformat(),
+              "authority": "research_only",
+              "production_authorized": False,
+              "execution_allowed": False,
+              "gates": gates,
+              "result": "success" if all(v == "success" for v in gates.values()) else "failure",
+          }
+          with open("assurance/assurance-summary.json", "w", encoding="utf-8") as fh:
+              json.dump(doc, fh, indent=2, sort_keys=True)
+              fh.write("\n")
+          print(json.dumps(doc, indent=2, sort_keys=True))
+          PY
+      - name: Upload assurance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daedalus-assurance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: assurance/assurance-summary.json
+          if-no-files-found: error
+          retention-days: 30
       - name: Require all change gates
         env:
           TESTS: ${{ needs.tests.result }}
@@ -164,10 +219,48 @@ jobs:
 
   scheduled-assurance:
     if: always() && github.event_name == 'schedule'
-    name: Scheduled assurance gate
+    name: Scheduled assurance gate + evidence
     needs: [scheduled-drift]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
+      - name: Emit scheduled assurance evidence
+        env:
+          DRIFT: ${{ needs.scheduled-drift.result }}
+        run: |
+          mkdir -p assurance
+          python - <<'PY'
+          import json, os
+          from datetime import datetime, timezone
+          gates = {"scheduled_drift": os.environ["DRIFT"]}
+          doc = {
+              "schema_version": 1,
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "workflow": os.environ["GITHUB_WORKFLOW"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "event": os.environ["GITHUB_EVENT_NAME"],
+              "sha": os.environ["GITHUB_SHA"],
+              "ref": os.environ["GITHUB_REF"],
+              "generated_at": datetime.now(timezone.utc).isoformat(),
+              "authority": "research_only",
+              "production_authorized": False,
+              "execution_allowed": False,
+              "gates": gates,
+              "result": "success" if os.environ["DRIFT"] == "success" else "failure",
+          }
+          with open("assurance/assurance-summary.json", "w", encoding="utf-8") as fh:
+              json.dump(doc, fh, indent=2, sort_keys=True)
+              fh.write("\n")
+          PY
+      - name: Upload scheduled assurance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daedalus-scheduled-assurance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: assurance/assurance-summary.json
+          if-no-files-found: error
+          retention-days: 30
       - name: Require drift check
         env:
           DRIFT: ${{ needs.scheduled-drift.result }}
