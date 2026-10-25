@@ -55,3 +55,8 @@ For alternate chart representations whose prices should **not** be treated as ex
 
 For the proposed whole-stack supervisory layer, see `docs/ATHENA_SUPERVISORY_FABRIC.md`.
 For exact continuation instructions and known unfinished release work, see `docs/NEXT_MODEL_HANDOFF.md`.
+
+## License and ownership
+
+Copyright (c) 2026 reppiks490. **Proprietary — all rights reserved.**
+Public visibility does not grant permission to reuse, redistribute, sell, or claim this work as your own. Written permission is required except where applicable law, existing grants, third-party terms, or GitHub's terms provide otherwise. See [LICENSE.md](LICENSE.md) for the full notice and permission requests.
